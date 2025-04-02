@@ -113,6 +113,3 @@ jobs:
 - **Keep Workflows Modular:**  
   Separate continuous integration from release management. This modularity simplifies maintenance and allows each process to excel in its role.
 
----
-
-Enhance your Rust development workflow with these GitHub actions and the complementary [harmony-labs/workflow-release](https://github.com/harmony-labs/workflow-release) project. Enjoy robust quality assurance and seamless cross-platform releases every time you push new code!
