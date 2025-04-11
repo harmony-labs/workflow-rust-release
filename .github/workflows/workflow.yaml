@@ -3,12 +3,24 @@ name: Build and Release Rust Binaries
 on:
   workflow_call:
     inputs:
-      executable_name:
-        description: 'The name of the executable'
-        required: true
+      binary_name:
+        description: "The name of the binary/executable (optional for library crates)"
+        required: false
+        type: string
+      crate_name:
+        description: "The name of the crate (for crates.io publishing)"
+        required: false
+        type: string
+      homebrew_tap:
+        description: "The Homebrew tap repository (org/repo)"
+        required: false
+        type: string
+      scoop_bucket:
+        description: "The Scoop bucket repository (org/repo)"
+        required: false
         type: string
       platforms:
-        description: 'JSON array of platforms for the matrix'
+        description: "JSON array of platforms for the matrix"
         required: false
         type: string
         default: |
@@ -23,12 +35,20 @@ on:
             {"os-name": "Windows-aarch64", "runs-on": "windows-latest", "target": "aarch64-pc-windows-msvc"},
             {"os-name": "Windows-x86_64", "runs-on": "windows-latest", "target": "x86_64-pc-windows-msvc"}
           ]
+    secrets:
+      CARGO_REGISTRY_TOKEN:
+        required: true
+      HOMEBREW_GITHUB_TOKEN:
+        required: true
+      SCOOP_GITHUB_TOKEN:
+        required: true
 
 permissions:
   contents: write
 
 jobs:
   publish:
+    if: ${{ inputs.binary_name != '' }}
     name: Build and Publish
     runs-on: ${{ matrix.platform.runs-on }}
     strategy:
@@ -37,7 +57,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v1
         with:
@@ -49,6 +69,71 @@ jobs:
       - name: Publish artifacts and release
         uses: houseabsolute/actions-rust-release@v0
         with:
-          executable-name: ${{ inputs.executable_name }}
+          executable-name: ${{ inputs.binary_name }}
           target: ${{ matrix.platform.target }}
           changes-file: ""
+  # --- Additional jobs for full Rust CLI release automation ---
+
+  publish-crate:
+    if: ${{ inputs.crate_name != '' }}
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "${CARGO_REGISTRY_TOKEN}" ]; then
+            echo "CARGO_REGISTRY_TOKEN is not set. Skipping crates.io publish."
+            exit 0
+          fi
+          cargo publish --token $CARGO_REGISTRY_TOKEN --no-verify
+
+  update-homebrew:
+    if: ${{ inputs.homebrew_tap != '' }}
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew formula and open PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
+        run: |
+          if [ -z "${GITHUB_TOKEN}" ]; then
+            echo "HOMEBREW_GITHUB_TOKEN is not set. Skipping Homebrew update."
+            exit 0
+          fi
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          gh auth login --with-token <<< "${GITHUB_TOKEN}"
+          gh repo clone ${{ inputs.homebrew_tap }} tap-repo
+          cd tap-repo
+          # TODO: Update the formula file here (e.g., sed to update version/sha256/url)
+          git add .
+          git commit -m "Update formula for ${{ inputs.binary_name }} to new release"
+          gh pr create --fill --title "Update formula for ${{ inputs.binary_name }}" --body "Automated update for new release"
+
+  update-scoop:
+    if: ${{ inputs.scoop_bucket != '' }}
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Scoop manifest and open PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "${GITHUB_TOKEN}" ]; then
+            echo "SCOOP_GITHUB_TOKEN is not set. Skipping Scoop update."
+            exit 0
+          fi
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          gh auth login --with-token <<< "${GITHUB_TOKEN}"
+          gh repo clone ${{ inputs.scoop_bucket }} scoop-bucket
+          cd scoop-bucket
+          # TODO: Update the manifest file here (e.g., jq or sed to update version/hash/url)
+          git add .
+          git commit -m "Update manifest for ${{ inputs.binary_name }} to new release"
+          gh pr create --fill --title "Update manifest for ${{ inputs.binary_name }}" --body "Automated update for new release"

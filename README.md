@@ -1,114 +1,95 @@
-# Workflow for Rust Projects
+# workflow-rust-release
 
-This repository offers a set of GitHub workflows focused on quality assurance and continuous integration for Rust projects. It’s designed to work seamlessly alongside our other workflows, which handle versioning, and tagging in a language agnostic way. Together, they provide a simple and modular approach to managing your code quality and release processes.
-
----
+Reusable GitHub Actions workflows for Rust CLI release automation.
 
 ## Overview
 
-- **Quality Assurance:**  
-  Automated builds, tests, linting, and formatting checks ensure your code remains robust and maintainable. Efficient caching strategies further reduce build times.
+This directory provides a set of workflows to automate the versioning, tagging, release, and optional registry publishing (crates.io, Homebrew, Scoop) for Rust CLI tools.
 
-- **Release Management:**  
-  While this repository manages CI and quality checks, you can integrate it with the separate [harmony-labs/workflow-release](https://github.com/harmony-labs/workflow-release) project to automate version bumps, tag creation, and GitHub Releases. In particular, the `release.yaml` workflow is a powerful tool for building and releasing Rust binaries across multiple platforms.
+### Workflows Included
 
----
+- **on-push-main-version-and-tag.yaml**
+  _Trigger:_ Push to `main`
+  _Purpose:_ Determines the next version number based on commit logs and tags, and creates a new version tag for release. Uses the reusable workflow from `workflow-vnext-tag`.
+  _Typical Use:_ Automates semantic versioning and tagging for your project.
 
-## Key Workflows & Their Triggers
+- **on-v-tag-release.yaml**
+  _Trigger:_ Push of a tag matching `v*.*.*`
+  _Purpose:_ Creates a GitHub Release for the new version tag using the ncipollo/release-action.
+  _Typical Use:_ Ensures every version tag gets a corresponding GitHub Release.
 
-### Quality Pipeline
-
-Run your code quality checks automatically on code updates.
-
-**Example:**
-```yaml
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  quality:
-    uses: harmony-labs/workflow-rust-quality/.github/workflows/quality.yaml@main
-    with:
-      cargo_test_args: '--verbose'
-      lint: true
-```
+- **workflow.yaml**
+  _Trigger:_ `workflow_call` (intended to be called from other repositories or workflows)
+  _Purpose:_ Builds Rust binaries for a matrix of platforms, uploads them to the GitHub Release, and optionally publishes to crates.io, Homebrew, and Scoop.
+  _Typical Use:_ The main reusable workflow for cross-platform Rust CLI release automation.
 
 ---
 
-### Quality, Versioning & Tagging
+## Typical Release Flow
 
-Use with other harmony-labs workflows to automatically generate versions and create Git tags based on commit logs, ensuring that only meaningful changes trigger a version bump.
+1. **Push to main**
+   - `on-push-main-version-and-tag.yaml` runs, determines the next version, and creates a tag (e.g., `v1.2.3`).
 
-**Example:**
+2. **Tag is pushed**
+   - `on-v-tag-release.yaml` runs, creating a GitHub Release for the new tag.
+
+3. **Reusable workflow is called**
+   - `workflow.yaml` is called (manually or via another workflow) to build binaries, upload them to the release, and optionally publish to registries.
+
+---
+
+## Usage: Reusable Release Workflow
+
+In your Rust CLI repository, add a workflow like:
+
 ```yaml
-on:
-  push:
-    branches:
-      - main
+name: Release
 
-jobs:
-  quality:
-    uses: harmony-labs/workflow-rust-quality/.github/workflows/workflow.yaml@main
-    with:
-      cargo_test_args: '--verbose'
-      lint: true
-
-  version-and-tag:
-    needs: quality
-    uses: harmony-labs/workflow-vnext-tag/.github/workflows/workflow.yaml@main
-    secrets: inherit
-    with:
-      useDeployKey: true
-      rust: true
-```
-
-And then add the following release job.
-
-### Releasing Rust Binaries
-
-The Version and tag job creates a tag - make sure to set up a deploy key for your repo and a secret to use it (will automate later).
-
-The `release.yaml` workflow is designed for building and releasing Rust binaries across multiple platforms using a matrix strategy. It helps you publish artifacts as GitHub Releases with ease. It picks up where version-and-tag leaves off.
-
-**Example Trigger:**
-```yaml
 on:
   push:
     tags:
-      - "v*.*.*"
+      - 'v*'
 
 jobs:
-  publish:
+  release:
     uses: harmony-labs/workflow-rust-release/.github/workflows/workflow.yaml@main
     with:
-      executable_name: my-app
-      platforms: '[{"os-name": "Linux-x86_64", "runs-on": "ubuntu-24.04", "target": "x86_64-unknown-linux-musl"}]'
+      binary_name: gh-config
+      crate_name: gh-config-cli
+      homebrew_tap: harmony-labs/homebrew-tap
+      scoop_bucket: harmony-labs/scoop-bucket
+    secrets:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+      HOMEBREW_GITHUB_TOKEN: ${{ secrets.HOMEBREW_GITHUB_TOKEN }}
+      SCOOP_GITHUB_TOKEN: ${{ secrets.SCOOP_GITHUB_TOKEN }}
 ```
 
----
+- Omit any input or secret to skip that registry/platform.
 
-## Getting Started
+## Inputs
 
-1. **Integrate the Workflows:**  
-   Copy the example snippets into your project’s `.github/workflows` directory. Adjust the inputs to match your project's specific needs.
+- `binary_name` (required): Name of the built binary/executable.
+- `crate_name` (optional): Name of the crate for crates.io publishing.
+- `homebrew_tap` (optional): Homebrew tap repo (org/repo) for formula PR.
+- `scoop_bucket` (optional): Scoop bucket repo (org/repo) for manifest PR.
+- `platforms` (optional): JSON array of build targets (see workflow for default).
 
-2. **Enhance Your Release Process:**  
-   For a full release management experience—including automated versioning, tagging, and artifact publishing—integrate the separate [harmony-labs/workflow-release](https://github.com/harmony-labs/workflow-release) project with these workflows.
+## Secrets
 
----
+- `CARGO_REGISTRY_TOKEN` (optional): crates.io API token.
+- `HOMEBREW_GITHUB_TOKEN` (optional): GitHub token with write access to the Homebrew tap repo.
+- `SCOOP_GITHUB_TOKEN` (optional): GitHub token with write access to the Scoop bucket repo.
 
-## Best Practices
+## How Homebrew/Scoop Updates Work
 
-- **Run Early Quality Checks:**  
-  Execute the quality pipeline on every push to ensure issues are caught before merging.
+- The workflow uses the GitHub CLI (`gh`) to fork, clone, update, commit, and open a PR to the tap/bucket repo.
+- You must implement the logic to update the formula/manifest file in the repo (see TODOs in the workflow).
 
-- **Automate Versioning:**  
-  Leverage commit messages to drive your versioning strategy, minimizing manual intervention and errors.
+## Extending
 
-- **Support Multiple Platforms:**  
-  Use the `release.yaml` workflow’s matrix strategy to build and release your Rust binaries on all major platforms.
+- Add logic to update the Homebrew formula and Scoop manifest as needed for your project.
+- You can customize the build matrix by overriding the `platforms` input.
 
-- **Keep Workflows Modular:**  
-  Separate continuous integration from release management. This modularity simplifies maintenance and allows each process to excel in its role.
+## License
+
+MIT
