@@ -37,11 +37,11 @@ on:
           ]
     secrets:
       CARGO_REGISTRY_TOKEN:
-        required: true
+        required: false
       HOMEBREW_GITHUB_TOKEN:
-        required: true
+        required: false
       SCOOP_GITHUB_TOKEN:
-        required: true
+        required: false
 
 permissions:
   contents: write
